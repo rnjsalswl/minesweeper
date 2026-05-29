@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -29,6 +30,9 @@ func NewGame() *Game {
 }
 
 func (g *Game) Run() {
+	var lastRune rune
+	var lastRuneTime time.Time
+
 	// tcell 초기화
 	sc, err := tcell.NewScreen()
 	if err != nil {
@@ -64,6 +68,14 @@ func (g *Game) Run() {
 					g.curC++
 				}
 			case tcell.KeyRune:
+				now := time.Now()
+				// 같은 키가 100ms 안에 또 들어오면 무시
+				if ev.Rune() == lastRune && now.Sub(lastRuneTime) < 100*time.Millisecond {
+					continue
+				}
+				lastRune = ev.Rune()
+				lastRuneTime = now
+
 				switch ev.Rune() {
 				case ' ':
 					g.open()
@@ -138,7 +150,7 @@ func (g *Game) draw() {
 
 	// 열 번호
 	for c := 0; c < g.board.Cols; c++ {
-		label := fmt.Sprintf("%2d", c+1)
+		label := fmt.Sprintf(" %2d", c+1)
 		for i, ch := range label {
 			sc.SetContent(4+c*4+i, 1, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
 		}
