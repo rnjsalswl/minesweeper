@@ -2,18 +2,21 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 type Game struct {
 	board      *Board
 	firstClick bool
+	curR, curC int
+	screen     tcell.Screen
 }
 
 func NewGame() *Game {
-	// 난이도 입력 받기 (예: 1-초급, 2-중급, 3-고급)
 	var choice, rows, cols, mines int
 	fmt.Print("난이도를 선택하세요 (1-초급, 2-중급, 3-고급): ")
-	fmt.Scanf("%d", &choice)
+	fmt.Scan(&choice)
 	switch choice {
 	case 1:
 		rows, cols, mines = 9, 9, 10
@@ -22,120 +25,190 @@ func NewGame() *Game {
 	case 3:
 		rows, cols, mines = 16, 30, 99
 	}
-
-	// newBoard 생성
 	return &Game{board: NewBoard(rows, cols, mines), firstClick: true}
 }
 
-// 게임 보드 출력
-//
-//	1  2  3  4  5
-//
-// 1  [ ][ ][1][ ][ ]
-// 2  [ ][F][ ][ ][ ]
-// 3  [1][1][ ][ ][ ]
-func (g *Game) printBoard() {
-
-	b := g.board
-
-	// 열 번호
-	fmt.Print("  ")
-	for c := 0; c < b.Cols; c++ {
-		fmt.Printf(" %2d ", c+1)
+func (g *Game) Run() {
+	// tcell 초기화
+	sc, err := tcell.NewScreen()
+	if err != nil {
+		panic(err)
 	}
-	fmt.Println()
+	if err := sc.Init(); err != nil {
+		panic(err)
+	}
+	defer sc.Fini()
+	g.screen = sc
 
-	for r := range b.Cells {
-		// 행 번호
-		fmt.Printf("%2d ", r+1)
-		for c := range b.Cells[r] {
-			cell := b.Cells[r][c]
-			if !cell.Revealed {
-				if cell.Flagged {
-					fmt.Print("[F ]")
-				} else {
-					fmt.Print("[. ]")
+	g.draw()
+
+	for {
+		ev := sc.PollEvent()
+		switch ev := ev.(type) {
+		case *tcell.EventKey:
+			switch ev.Key() {
+			case tcell.KeyUp:
+				if g.curR > 0 {
+					g.curR--
 				}
-			} else if cell.IsMine {
-				fmt.Print("[* ]")
-			} else if cell.Adjacent > 0 {
-				fmt.Printf("[%d ]", cell.Adjacent)
-			} else {
-				fmt.Print("[  ]") // 열린 빈 칸
+			case tcell.KeyDown:
+				if g.curR < g.board.Rows-1 {
+					g.curR++
+				}
+			case tcell.KeyLeft:
+				if g.curC > 0 {
+					g.curC--
+				}
+			case tcell.KeyRight:
+				if g.curC < g.board.Cols-1 {
+					g.curC++
+				}
+			case tcell.KeyRune:
+				switch ev.Rune() {
+				case ' ':
+					g.open()
+				case 'f', 'F':
+					g.flag()
+				case 'q', 'Q':
+					return
+				}
+			case tcell.KeyEscape:
+				return
 			}
+			g.draw()
+
+		case *tcell.EventResize:
+			sc.Sync()
+			g.draw()
 		}
-		fmt.Println()
 	}
 }
 
-func (g *Game) Run() {
-	// 첫 화면
-	g.printBoard()
+func (g *Game) open() {
+	r, c := g.curR, g.curC
+	cell := &g.board.Cells[r][c]
 
-	for {
-		var r, c int
-		var action string
-		fmt.Print("행 열 액션 (o/f): ")
-		fmt.Scan(&r, &c, &action)
+	if cell.Revealed {
+		return
+	}
+	if cell.Flagged {
+		return
+	}
 
-		// 0 인덱스로 변환
-		r--
-		c--
+	if g.firstClick {
+		g.board.PlaceMines(r, c)
+		g.board.CalcAdjacent()
+		g.firstClick = false
+	}
 
-		// 범위 체크
-		if r < 0 || r >= g.board.Rows || c < 0 || c >= g.board.Cols {
-			fmt.Println("올바른 좌표를 입력하세요.")
-			continue
+	if cell.IsMine {
+		cell.Revealed = true
+		g.draw()
+		g.showMessage("지뢰를 밟았어요! 게임오버. (q로 종료)", tcell.ColorRed)
+		g.waitQuit()
+		return
+	}
+
+	g.board.RevealBFS(r, c)
+
+	if g.checkWin() {
+		g.draw()
+		g.showMessage("클리어! 모든 지뢰를 찾았어요! (q로 종료)", tcell.ColorGreen)
+		g.waitQuit()
+	}
+}
+
+func (g *Game) flag() {
+	r, c := g.curR, g.curC
+	cell := &g.board.Cells[r][c]
+	if !cell.Revealed {
+		cell.Flagged = !cell.Flagged
+	}
+}
+
+func (g *Game) draw() {
+	sc := g.screen
+	sc.Clear()
+
+	// 상단 안내
+	guide := "방향키: 이동  스페이스: 열기  f: 깃발  q: 종료"
+	for i, ch := range guide {
+		sc.SetContent(i, 0, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
+	}
+
+	// 열 번호
+	for c := 0; c < g.board.Cols; c++ {
+		label := fmt.Sprintf("%2d", c+1)
+		for i, ch := range label {
+			sc.SetContent(4+c*4+i, 1, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
+		}
+	}
+
+	// 보드
+	for r := range g.board.Cells {
+		// 행 번호
+		label := fmt.Sprintf("%2d", r+1)
+		for i, ch := range label {
+			sc.SetContent(i, r+2, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
 		}
 
-		switch action {
-		case "o":
-			// 첫 클릭이면 지뢰 배치
-			if g.firstClick {
-				g.board.PlaceMines(r, c)
-				g.board.CalcAdjacent()
-				g.firstClick = false
+		for c := range g.board.Cells[r] {
+			cell := g.board.Cells[r][c]
+			x := 4 + c*4
+			y := r + 2
+
+			// 커서 스타일
+			style := tcell.StyleDefault
+			if r == g.curR && c == g.curC {
+				style = style.Background(tcell.ColorNavy)
 			}
 
-			cell := &g.board.Cells[r][c]
+			var text string
+			var color tcell.Color
 
-			if cell.Revealed {
-				fmt.Println("이미 열린 칸이에요.")
-				continue
-			}
-			if cell.Flagged {
-				fmt.Println("깃발이 있는 칸이에요. f로 먼저 해제하세요.")
-				continue
+			if !cell.Revealed {
+				if cell.Flagged {
+					text = "[F ]"
+					color = tcell.ColorRed
+				} else {
+					text = "[. ]"
+					color = tcell.ColorGray
+				}
+			} else if cell.IsMine {
+				text = "[* ]"
+				color = tcell.ColorRed
+			} else if cell.Adjacent > 0 {
+				text = fmt.Sprintf("[%d ]", cell.Adjacent)
+				color = numberColor(cell.Adjacent)
+			} else {
+				text = "[  ]"
+				color = tcell.ColorWhite
 			}
 
-			if cell.IsMine {
-				cell.Revealed = true
-				g.printBoard()
-				fmt.Println("지뢰를 밟았어요! 게임오버.")
+			for i, ch := range text {
+				sc.SetContent(x+i, y, ch, nil, style.Foreground(color))
+			}
+		}
+	}
+
+	sc.Show()
+}
+
+func (g *Game) showMessage(msg string, color tcell.Color) {
+	y := g.board.Rows + 3
+	for i, ch := range msg {
+		g.screen.SetContent(i, y, ch, nil, tcell.StyleDefault.Foreground(color))
+	}
+	g.screen.Show()
+}
+
+func (g *Game) waitQuit() {
+	for {
+		ev := g.screen.PollEvent()
+		if ev, ok := ev.(*tcell.EventKey); ok {
+			if ev.Key() == tcell.KeyEscape || ev.Rune() == 'q' || ev.Rune() == 'Q' {
 				return
 			}
-
-			g.board.RevealBFS(r, c)
-
-		case "f":
-			cell := &g.board.Cells[r][c]
-			if cell.Revealed {
-				fmt.Println("이미 열린 칸이에요.")
-				continue
-			}
-			cell.Flagged = !cell.Flagged
-
-		default:
-			fmt.Println("o 또는 f를 입력하세요.")
-			continue
-		}
-
-		g.printBoard()
-
-		// 승리 체크
-		if g.checkWin() {
-			fmt.Println("클리어! 모든 지뢰를 찾았어요!")
-			return
 		}
 	}
 }
@@ -150,4 +223,23 @@ func (g *Game) checkWin() bool {
 		}
 	}
 	return true
+}
+
+func numberColor(n int) tcell.Color {
+	switch n {
+	case 1:
+		return tcell.ColorBlue
+	case 2:
+		return tcell.ColorGreen
+	case 3:
+		return tcell.ColorOrange
+	case 4:
+		return tcell.ColorNavy
+	case 5:
+		return tcell.ColorMaroon
+	case 6:
+		return tcell.ColorTeal
+	default:
+		return tcell.ColorWhite
+	}
 }
