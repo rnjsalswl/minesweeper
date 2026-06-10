@@ -81,7 +81,7 @@ func (b *Board) RevealBFS(startR, startC int) {
 				nr, nc := r+d[0], c+d[1]
 				if nr >= 0 && nr < b.Rows && nc >= 0 && nc < b.Cols {
 					cell := &b.Cells[nr][nc]
-					if !cell.Revealed && !cell.IsMine && !cell.Flagged {
+					if !cell.Revealed && !cell.IsMine && !cell.Flagged && !cell.Checked {
 						cell.Revealed = true
 						queue = append(queue, [2]int{nr, nc})
 					}

@@ -81,6 +81,10 @@ func (g *Game) Run() {
 					g.open()
 				case 'f', 'F':
 					g.flag()
+				case 'c', 'C':
+					g.check()
+				case 'r', 'R':
+					g.restart()
 				case 'q', 'Q':
 					return
 				}
@@ -116,8 +120,10 @@ func (g *Game) open() {
 	if cell.IsMine {
 		cell.Revealed = true
 		g.draw()
-		g.showMessage("지뢰를 밟았어요! 게임오버. (q로 종료)", tcell.ColorRed)
-		g.waitQuit()
+		g.showMessage("지뢰를 밟았어요! 게임오버. (r: 재시작, q: 종료)", tcell.ColorRed)
+		if g.waitQuit() {
+			g.restart()
+		}
 		return
 	}
 
@@ -125,8 +131,10 @@ func (g *Game) open() {
 
 	if g.checkWin() {
 		g.draw()
-		g.showMessage("클리어! 모든 지뢰를 찾았어요! (q로 종료)", tcell.ColorGreen)
-		g.waitQuit()
+		g.showMessage("클리어! 모든 지뢰를 찾았어요! (r: 재시작, q: 종료)", tcell.ColorGreen)
+		if g.waitQuit() {
+			g.restart()
+		}
 	}
 }
 
@@ -135,6 +143,14 @@ func (g *Game) flag() {
 	cell := &g.board.Cells[r][c]
 	if !cell.Revealed {
 		cell.Flagged = !cell.Flagged
+	}
+}
+
+func (g *Game) check() {
+	r, c := g.curR, g.curC
+	cell := &g.board.Cells[r][c]
+	if !cell.Revealed {
+		cell.Checked = !cell.Checked
 	}
 }
 
@@ -156,7 +172,7 @@ func (g *Game) draw() {
 
 	// 상단 안내
 	flags := g.countFlags()
-	guide := fmt.Sprintf("방향키: 이동  스페이스: 열기  f: 깃발  q: 종료   |  깃발: %d / 지뢰: %d", flags, g.board.Mines)
+	guide := fmt.Sprintf("방향키: 이동  스페이스: 열기  f: 깃발  c: 체크  r: 재시작  q: 종료   |  깃발: %d / 지뢰: %d", flags, g.board.Mines)
 	for i, ch := range guide {
 		sc.SetContent(i, 0, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
 	}
@@ -182,10 +198,12 @@ func (g *Game) draw() {
 			x := 4 + c*4
 			y := r + 2
 
-			// 커서 스타일
+			// 커서 및 주변 하이라이트 스타일
 			style := tcell.StyleDefault
 			if r == g.curR && c == g.curC {
 				style = style.Background(tcell.ColorNavy)
+			} else if abs(r-g.curR) <= 1 && abs(c-g.curC) <= 1 {
+				style = style.Background(tcell.ColorDarkSlateGray)
 			}
 
 			var text string
@@ -195,6 +213,9 @@ func (g *Game) draw() {
 				if cell.Flagged {
 					text = "[F ]"
 					color = tcell.ColorRed
+				} else if cell.Checked {
+					text = "[C ]"
+					color = tcell.ColorGray
 				} else {
 					text = "[. ]"
 					color = tcell.ColorGray
@@ -227,15 +248,25 @@ func (g *Game) showMessage(msg string, color tcell.Color) {
 	g.screen.Show()
 }
 
-func (g *Game) waitQuit() {
+func (g *Game) waitQuit() bool {
 	for {
 		ev := g.screen.PollEvent()
 		if ev, ok := ev.(*tcell.EventKey); ok {
 			if ev.Key() == tcell.KeyEscape || ev.Rune() == 'q' || ev.Rune() == 'Q' {
-				return
+				return false
+			}
+			if ev.Rune() == 'r' || ev.Rune() == 'R' {
+				return true
 			}
 		}
 	}
+}
+
+func (g *Game) restart() {
+	g.board = NewBoard(g.board.Rows, g.board.Cols, g.board.Mines)
+	g.firstClick = true
+	g.curR = 0
+	g.curC = 0
 }
 
 func (g *Game) checkWin() bool {
