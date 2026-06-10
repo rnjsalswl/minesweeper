@@ -81,10 +81,6 @@ func (g *Game) Run() {
 					g.open()
 				case 'f', 'F':
 					g.flag()
-				case 'c', 'C':
-					g.check()
-				case 'r', 'R':
-					g.restart()
 				case 'q', 'Q':
 					return
 				}
@@ -146,33 +142,12 @@ func (g *Game) flag() {
 	}
 }
 
-func (g *Game) check() {
-	r, c := g.curR, g.curC
-	cell := &g.board.Cells[r][c]
-	if !cell.Revealed {
-		cell.Checked = !cell.Checked
-	}
-}
-
-func (g *Game) countFlags() int {
-	count := 0
-	for r := range g.board.Cells {
-		for c := range g.board.Cells[r] {
-			if g.board.Cells[r][c].Flagged {
-				count++
-			}
-		}
-	}
-	return count
-}
-
 func (g *Game) draw() {
 	sc := g.screen
 	sc.Clear()
 
 	// 상단 안내
-	flags := g.countFlags()
-	guide := fmt.Sprintf("방향키: 이동  스페이스: 열기  f: 깃발  c: 체크  r: 재시작  q: 종료   |  깃발: %d / 지뢰: %d", flags, g.board.Mines)
+	guide := "방향키: 이동  스페이스: 열기  f: 깃발  q: 종료"
 	for i, ch := range guide {
 		sc.SetContent(i, 0, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
 	}
