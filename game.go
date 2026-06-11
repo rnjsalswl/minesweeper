@@ -9,13 +9,13 @@ import (
 )
 
 type Game struct {
-	board      *Board
-	firstClick bool
-	curR, curC int
-	screen     tcell.Screen
-	hintCount  int
+	board             *Board
+	firstClick        bool
+	curR, curC        int
+	screen            tcell.Screen
+	hintCount         int
 	rows, cols, mines int
-	quit       bool
+	quit              bool
 }
 
 func NewGame() *Game {
@@ -263,7 +263,7 @@ func (g *Game) draw() {
 					color = tcell.ColorRed
 				} else if cell.Commented {
 					text = "[? ]"
-					color = tcell.ColorYellow
+					color = tcell.ColorGray
 				} else {
 					text = "[. ]"
 					color = tcell.ColorGray
