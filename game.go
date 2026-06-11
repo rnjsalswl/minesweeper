@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -12,6 +13,9 @@ type Game struct {
 	firstClick bool
 	curR, curC int
 	screen     tcell.Screen
+	hintCount  int
+	rows, cols, mines int
+	quit       bool
 }
 
 func NewGame() *Game {
@@ -26,14 +30,19 @@ func NewGame() *Game {
 	case 3:
 		rows, cols, mines = 16, 30, 99
 	}
-	return &Game{board: NewBoard(rows, cols, mines), firstClick: true}
+	return &Game{
+		board:      NewBoard(rows, cols, mines),
+		firstClick: true,
+		rows:       rows,
+		cols:       cols,
+		mines:      mines,
+	}
 }
 
 func (g *Game) Run() {
 	var lastRune rune
 	var lastRuneTime time.Time
 
-	// tcell 초기화
 	sc, err := tcell.NewScreen()
 	if err != nil {
 		panic(err)
@@ -69,7 +78,6 @@ func (g *Game) Run() {
 				}
 			case tcell.KeyRune:
 				now := time.Now()
-				// 같은 키가 100ms 안에 또 들어오면 무시
 				if ev.Rune() == lastRune && now.Sub(lastRuneTime) < 100*time.Millisecond {
 					continue
 				}
@@ -81,10 +89,19 @@ func (g *Game) Run() {
 					g.open()
 				case 'f', 'F':
 					g.flag()
+				case 'c', 'C':
+					g.comment()
+				case 'h', 'H':
+					g.hint()
+				case 'r', 'R':
+					g.restart()
 				case 'q', 'Q':
 					return
 				}
 			case tcell.KeyEscape:
+				return
+			}
+			if g.quit {
 				return
 			}
 			g.draw()
@@ -116,8 +133,8 @@ func (g *Game) open() {
 	if cell.IsMine {
 		cell.Revealed = true
 		g.draw()
-		g.showMessage("지뢰를 밟았어요! 게임오버. (q로 종료)", tcell.ColorRed)
-		g.waitQuit()
+		g.showMessage("지뢰를 밟았어요! 게임오버. (r: 재시작, q: 종료)", tcell.ColorRed)
+		g.waitQuitOrRestart()
 		return
 	}
 
@@ -125,8 +142,8 @@ func (g *Game) open() {
 
 	if g.checkWin() {
 		g.draw()
-		g.showMessage("클리어! 모든 지뢰를 찾았어요! (q로 종료)", tcell.ColorGreen)
-		g.waitQuit()
+		g.showMessage("클리어! 모든 지뢰를 찾았어요! (r: 재시작, q: 종료)", tcell.ColorGreen)
+		g.waitQuitOrRestart()
 	}
 }
 
@@ -135,7 +152,56 @@ func (g *Game) flag() {
 	cell := &g.board.Cells[r][c]
 	if !cell.Revealed {
 		cell.Flagged = !cell.Flagged
+		if cell.Flagged {
+			cell.Commented = false
+		}
 	}
+}
+
+func (g *Game) comment() {
+	r, c := g.curR, g.curC
+	cell := &g.board.Cells[r][c]
+	if !cell.Revealed {
+		cell.Commented = !cell.Commented
+		if cell.Commented {
+			cell.Flagged = false
+		}
+	}
+}
+
+func (g *Game) hint() {
+	if g.firstClick {
+		return
+	}
+	var safeCells [][2]int
+	for r := range g.board.Cells {
+		for c := range g.board.Cells[r] {
+			cell := g.board.Cells[r][c]
+			if !cell.IsMine && !cell.Revealed && !cell.Flagged {
+				safeCells = append(safeCells, [2]int{r, c})
+			}
+		}
+	}
+	rand.Shuffle(len(safeCells), func(i, j int) {
+		safeCells[i], safeCells[j] = safeCells[j], safeCells[i]
+	})
+	count := 0
+	for _, pos := range safeCells {
+		if count >= 3 {
+			break
+		}
+		g.board.Cells[pos[0]][pos[1]].Revealed = true
+		count++
+	}
+	g.hintCount++
+}
+
+func (g *Game) restart() {
+	g.board = NewBoard(g.rows, g.cols, g.mines)
+	g.firstClick = true
+	g.curR = 0
+	g.curC = 0
+	g.hintCount = 0
 }
 
 func (g *Game) countFlags() int {
@@ -154,14 +220,12 @@ func (g *Game) draw() {
 	sc := g.screen
 	sc.Clear()
 
-	// 상단 안내
 	flags := g.countFlags()
-	guide := fmt.Sprintf("방향키: 이동  스페이스: 열기  f: 깃발  q: 종료   |  깃발: %d / 지뢰: %d", flags, g.board.Mines)
+	guide := fmt.Sprintf("방향키:이동  스페이스:열기  f:깃발  c:메모  h:힌트(%d회)  r:재시작  q:종료   |  깃발:%d / 지뢰:%d", g.hintCount, flags, g.board.Mines)
 	for i, ch := range guide {
 		sc.SetContent(i, 0, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
 	}
 
-	// 열 번호
 	for c := 0; c < g.board.Cols; c++ {
 		label := fmt.Sprintf(" %2d", c+1)
 		for i, ch := range label {
@@ -169,9 +233,7 @@ func (g *Game) draw() {
 		}
 	}
 
-	// 보드
 	for r := range g.board.Cells {
-		// 행 번호
 		label := fmt.Sprintf("%2d", r+1)
 		for i, ch := range label {
 			sc.SetContent(i, r+2, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorGray))
@@ -182,10 +244,14 @@ func (g *Game) draw() {
 			x := 4 + c*4
 			y := r + 2
 
-			// 커서 스타일
 			style := tcell.StyleDefault
-			if r == g.curR && c == g.curC {
+			isCursor := r == g.curR && c == g.curC
+			isNeighbor := !isCursor && abs(r-g.curR) <= 1 && abs(c-g.curC) <= 1
+
+			if isCursor {
 				style = style.Background(tcell.ColorNavy)
+			} else if isNeighbor {
+				style = style.Background(tcell.NewRGBColor(30, 30, 80))
 			}
 
 			var text string
@@ -195,6 +261,9 @@ func (g *Game) draw() {
 				if cell.Flagged {
 					text = "[F ]"
 					color = tcell.ColorRed
+				} else if cell.Commented {
+					text = "[? ]"
+					color = tcell.ColorYellow
 				} else {
 					text = "[. ]"
 					color = tcell.ColorGray
@@ -227,11 +296,17 @@ func (g *Game) showMessage(msg string, color tcell.Color) {
 	g.screen.Show()
 }
 
-func (g *Game) waitQuit() {
+func (g *Game) waitQuitOrRestart() {
 	for {
 		ev := g.screen.PollEvent()
 		if ev, ok := ev.(*tcell.EventKey); ok {
-			if ev.Key() == tcell.KeyEscape || ev.Rune() == 'q' || ev.Rune() == 'Q' {
+			switch {
+			case ev.Key() == tcell.KeyEscape || ev.Rune() == 'q' || ev.Rune() == 'Q':
+				g.quit = true
+				return
+			case ev.Rune() == 'r' || ev.Rune() == 'R':
+				g.restart()
+				g.draw()
 				return
 			}
 		}
