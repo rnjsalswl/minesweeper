@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -12,21 +15,38 @@ type Game struct {
 	firstClick bool
 	curR, curC int
 	screen     tcell.Screen
+	quit       bool // 게임오버·클리어 화면에서 q를 누르면 true
+}
+
+// 난이도별 판 크기와 지뢰 수
+var levels = map[string][3]int{
+	"1": {9, 9, 10},   // 초급
+	"2": {16, 16, 40}, // 중급
+	"3": {16, 30, 99}, // 고급
 }
 
 func NewGame() *Game {
-	var choice, rows, cols, mines int
-	fmt.Print("난이도를 선택하세요 (1-초급, 2-중급, 3-고급): ")
-	fmt.Scan(&choice)
-	switch choice {
-	case 1:
-		rows, cols, mines = 9, 9, 10
-	case 2:
-		rows, cols, mines = 16, 16, 40
-	case 3:
-		rows, cols, mines = 16, 30, 99
-	}
+	rows, cols, mines := askLevel(bufio.NewReader(os.Stdin))
 	return &Game{board: NewBoard(rows, cols, mines), firstClick: true}
+}
+
+// askLevel은 1~3이 들어올 때까지 다시 묻는다.
+// 예전에는 다른 값을 넣으면 0×0 판이 만들어져서 바로 죽었다.
+// 입력이 끝나 버리면(EOF) 초급으로 시작한다.
+func askLevel(in *bufio.Reader) (rows, cols, mines int) {
+	for {
+		fmt.Print("난이도를 선택하세요 (1-초급, 2-중급, 3-고급): ")
+		line, err := in.ReadString('\n')
+		if l, ok := levels[strings.TrimSpace(line)]; ok {
+			return l[0], l[1], l[2]
+		}
+		if err != nil {
+			fmt.Println("\n입력이 없어서 초급으로 시작합니다.")
+			l := levels["1"]
+			return l[0], l[1], l[2]
+		}
+		fmt.Println("1, 2, 3 중에서 골라주세요.")
+	}
 }
 
 func (g *Game) Run() {
@@ -79,6 +99,9 @@ func (g *Game) Run() {
 				switch ev.Rune() {
 				case ' ':
 					g.open()
+					if g.quit {
+						return
+					}
 				case 'f', 'F':
 					g.flag()
 				case 'q', 'Q':
@@ -119,6 +142,8 @@ func (g *Game) open() {
 		g.showMessage("지뢰를 밟았어요! 게임오버. (r: 재시작, q: 종료)", tcell.ColorRed)
 		if g.waitQuit() {
 			g.restart()
+		} else {
+			g.quit = true
 		}
 		return
 	}
@@ -130,6 +155,8 @@ func (g *Game) open() {
 		g.showMessage("클리어! 모든 지뢰를 찾았어요! (r: 재시작, q: 종료)", tcell.ColorGreen)
 		if g.waitQuit() {
 			g.restart()
+		} else {
+			g.quit = true
 		}
 	}
 }
